@@ -136,7 +136,7 @@ class Command<S, P>(var name: String) {
      * Note that this data is unique to the Command object, not to each individual call.
      * Properties object is initialized lazily using kotlin's lazy delegate.
      */
-    val properties: Map<String, String> by lazy { HashMap<String, String>() }
+    val properties: MutableMap<String, String> by lazy { HashMap<String, String>() }
     /**
      * Alternative command names that will also activate this command.
      * Matching-wise they function the same as the base name of the command.
