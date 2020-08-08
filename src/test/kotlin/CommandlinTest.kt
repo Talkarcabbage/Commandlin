@@ -8,20 +8,20 @@ class CommandlinTest {
         val cmdMan = commandlin<SourceTest, Int> {
             command("basictest") {
                 permissionVerifier = BasicPermissionVerifier(8)
-                func { args, src->
+                func { _, src->
                     println("Hallo, ${src?.name ?: "we had no source"}")
                 }
             }
             command("argstest") {
                 this.expectedArgsMax=1
                 this.expectedArgsMin=1
-                func { args, src ->
+                func { args, _ ->
                     println("We got one arg successfully:${args[0]}")
                 }
             }
             command("argstestmin") {
                 this.expectedArgsMin=1
-                func { args, src ->
+                func { args, _ ->
                     println("We got one arg successfully:${args[0]}")
                 }
             }
@@ -42,9 +42,9 @@ class CommandlinTest {
             command("returntypetest") {
                 func {args,_ ->
                     if (args.isNotEmpty() && args[0]=="true") {
-                        returnTypeOne()
+                        returnTypeOne() //Has no return statement at all
                     } else {
-                        returnTypeTwo()
+                        returnTypeTwo() //Returns an empty String
                     }
                 }
             }

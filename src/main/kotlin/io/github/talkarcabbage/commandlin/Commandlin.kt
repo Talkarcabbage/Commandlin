@@ -11,14 +11,14 @@ enum class CommandResult {
 
 
 /**
- * S: The type representing the source of the command. Can be any type. Passed to command when executed.
+ * S: The type representing the source of the command. Can be Any? type. Passed to command when executed.
  * P: The type used by the PermissionVerifier implementation used. The built-in type,
  * BasicPermissionVerifier, uses Int as its type.
  * If you do not need a source and/or permission type, passing the Nothing type should work. Most uses of
  * these generics are nullable, as well.
  *
  */
-fun <S, P> commandlin(incFun: CommandlinManager<S, P>.() -> Any): CommandlinManager<S, P> {
+fun <S, P> commandlin(incFun: CommandlinManager<S, P>.() -> Any?): CommandlinManager<S, P> {
     val commandlinBuilder = CommandlinManager<S, P>()
     commandlinBuilder.incFun()
     return commandlinBuilder
@@ -116,7 +116,7 @@ class CommandlinManager<S, P> {
      * This function will throw an IllegalStateException if requireCommandPermission is set and
      * the command does not have a permission verifier set in its lambda.
      */
-    fun command(id: String, incFun: Command<S, P>.() -> Any) {
+    fun command(id: String, incFun: Command<S, P>.() -> Any?) {
         if (findMatchingCommand(id)!=null) {
             println("Failed to add a command that already exists or has an alias: $id")
             return
@@ -154,7 +154,7 @@ class Command<S, P>(var name: String) {
     /**
      * The actual function/lambda to execute
      */
-    var commandFunction: ((List<String>, S?) -> Any)? = null
+    var commandFunction: ((List<String>, S?) -> Any?)? = null
     /**
      * Optional map for storing instanced data for the command without a need for subclassing.
      * Note that this data is unique to the Command object, not to each individual call.
@@ -185,7 +185,7 @@ class Command<S, P>(var name: String) {
      * as the permission verifier should be called and tested for
      * a true boolean prior to this function being executed.
      */
-    fun func(incFunction: ((List<String>, S?) -> Any)) {
+    fun func(incFunction: ((List<String>, S?) -> Any?)) {
         this.commandFunction = incFunction
     }
 }
