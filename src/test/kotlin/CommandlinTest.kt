@@ -19,6 +19,12 @@ class CommandlinTest {
                     println("We got one arg successfully:${args[0]}")
                 }
             }
+            command("argstestmin") {
+                this.expectedArgsMin=1
+                func { args, src ->
+                    println("We got one arg successfully:${args[0]}")
+                }
+            }
             command("warnmemissing") {
 
             }
@@ -28,14 +34,29 @@ class CommandlinTest {
                     println("I should print and be successful!")
                 }
             }
+            command("returntest") {
+                func {_,_ ->
+                    return@func CommandResult.INVALID_ARGUMENTS
+                }
+            }
+            command("returntypetest") {
+                func {args,_ ->
+                    if (args.isNotEmpty() && args[0]=="true") {
+                        returnTypeOne()
+                    } else {
+                        returnTypeTwo()
+                    }
+                }
+            }
         }
         val nothingTest = commandlin<Nothing, Nothing> {
             command("potato") {
-                func { args, _ ->
+                func { _, _ ->
                     println("I have Nothing!")
                 }
             }
         }
+        assertEquals( CommandResult.SUCCESS, cmdMan.process("argstestmin asdf",0, null))
         nothingTest.process("ayylmao","", null,null)
         assertEquals(cmdMan.process("basictest", listOf(), 8, SourceTest("Hi I'm a test")), CommandResult.SUCCESS)
         assertEquals(cmdMan.process("basictest", listOf(), 8, SourceTest("Hi I'm a test")), CommandResult.SUCCESS)
@@ -44,10 +65,15 @@ class CommandlinTest {
         assertEquals(cmdMan.process("argstest", listOf(), 0, null), CommandResult.INVALID_ARGUMENTS)
         assertEquals(cmdMan.process("argstest", listOf(""), 0, null), CommandResult.SUCCESS)
         assertEquals(cmdMan.process("argstest", listOf("",""), 0, null), CommandResult.INVALID_ARGUMENTS)
+        assertEquals( CommandResult.INVALID_ARGUMENTS, cmdMan.process("argstestmin",0, null))
+        assertEquals(CommandResult.SUCCESS, cmdMan.process("argstest", "asdf",0, null))
+        assertEquals(CommandResult.SUCCESS, cmdMan.process("argstest test", 0, null))
         assertEquals(cmdMan.process("asdf"), CommandResult.NO_MATCHING_COMMAND)
         assertEquals(CommandResult.NO_COMMAND_FUNCTION, cmdMan.process("warnmemissing"))
         nothingTest.process("potato", listOf())
         assertEquals(CommandResult.SUCCESS, cmdMan.process("aliased"))
+        assertEquals(CommandResult.INVALID_ARGUMENTS, cmdMan.process("returntest"))
+        assertEquals(CommandResult.SUCCESS, cmdMan.process("returntypetest"))
     }
 
     @Test
@@ -110,8 +136,16 @@ class CommandlinTest {
         assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestMandatory.process("underauth"))
         assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestMandatory.process("underauth", 1))
         assertEquals(CommandResult.SUCCESS, authTestMandatory.process("allowedauth", 5))
+    }
+
+    fun returnTypeTwo(): String {
+        return ""
+    }
+
+    fun returnTypeOne() {
 
     }
+
 }
 
 class SourceTest(var name: String)

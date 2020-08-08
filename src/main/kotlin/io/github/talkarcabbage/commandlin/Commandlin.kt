@@ -8,6 +8,8 @@ enum class CommandResult {
     NO_COMMAND_FUNCTION
 }
 
+
+
 /**
  * S: The type representing the source of the command. Can be any type. Passed to command when executed.
  * P: The type used by the PermissionVerifier implementation used. The built-in type,
@@ -16,7 +18,7 @@ enum class CommandResult {
  * these generics are nullable, as well.
  *
  */
-fun <S, P> commandlin(incFun: CommandlinManager<S, P>.() -> Unit): CommandlinManager<S, P> {
+fun <S, P> commandlin(incFun: CommandlinManager<S, P>.() -> Any): CommandlinManager<S, P> {
     val commandlinBuilder = CommandlinManager<S, P>()
     commandlinBuilder.incFun()
     return commandlinBuilder
@@ -24,14 +26,29 @@ fun <S, P> commandlin(incFun: CommandlinManager<S, P>.() -> Unit): CommandlinMan
 
 class CommandlinManager<S, P> {
     val commands: MutableList<Command<S, P>> = mutableListOf()
-    var requireCommandPermission=false //If true, a command must have permissions when added.
+    /**
+     * If true, a command must have a permissions assigned during creation, or it will not be added.
+     * It cannot be disabled once set to enabled!
+     */
+    var requireCommandPermission=false
+        set(enabled) {
+            if (enabled)
+                field = enabled
+        }
+
     private fun addCommand(com: Command<S, P>) = commands.add(com)
     /**
      * Process the given command, with arguments given as an Array of strings.
-     * The command will not execute if expected arguments are set and
+     * Execution flows as follows.
+     *
+     * 1. If a command is not matched, CommandResult.NO_MATCHING_COMMAND is returned.
+     *
+     * 2. IF the command has an attached PermissionVerifier, it will be passed P. If the PermissionVerifier returns false,
+     * the command function will not execute and CommandResult.INSUFFICIENT_PRIVILEGES is returned.
+     * If NO permissionVerifier was set on the command, this step is skipped entirely.
+     *
+     * 3. The command will not execute if expected arguments minimum or maximum are set and
      * do not match requirements.
-     * If the command has a permission verifier, the given permissionObject will be
-     * passed to it before the command is allowed to run.
      *
      */
     fun process(commandId: String, args: List<String>, permissionObject: P?=null, source: S?=null): CommandResult {
@@ -44,23 +61,30 @@ class CommandlinManager<S, P> {
             if (!command.verifyArgsCount(args.size)) {
                 return CommandResult.INVALID_ARGUMENTS
             }
-            command.commandFunction?.invoke(args, source) ?: (return CommandResult.NO_COMMAND_FUNCTION)
+            val cmd = command.commandFunction
+            return if (cmd!=null) {
+                val result: Any? = cmd(args, source)
+                if (result is CommandResult) result else CommandResult.SUCCESS
+            } else {
+                CommandResult.NO_COMMAND_FUNCTION
+            }
         } else {
             return CommandResult.NO_MATCHING_COMMAND
         }
-        return CommandResult.SUCCESS
     }
     /**
      * Process the given command, with arguments given as a single string.
      * The command will not execute if expected arguments are set and
      * do not match requirements.
-     * Convenience method. Splits the arguments, treating items in quotation marks
-     * as a single argument, passing them to process()
+     * Convenience method. Splits the arguments by spaces, passing them to process(String, List<String>, P, S)
      */
     fun process(commandId: String, arg: String, permissionObject: P?=null, source: S?=null): CommandResult {
+        println("Processing middle tier with $arg")
         return if (arg.trim()=="") {
+            println("Processing args==\"\"")
             process(commandId,listOf(), permissionObject, source)
         } else {
+            println("Processing args!=\"\" with split results size of ${arg.split(' ').size}")
             process(commandId, arg.split(' '), permissionObject, source)
         }
     }
@@ -69,10 +93,10 @@ class CommandlinManager<S, P> {
      * The command will not execute if expected arguments are set and
      * do not match requirements.
      * Convenience method. First argument is treated as commandId.
-     * Splits the remaining arguments, treating items in quotation marks
-     * as a single argument, passing them to process()
+     * Splits the remaining arguments by space and passes them to process(String, String, P, S)
      */
     fun process(input: String, permissionObject: P?=null, source: S?=null): CommandResult {
+        println("Processed command as [${input.substringBefore(' ')}] and args as [${input.substringAfter(' ', "")}]")
         return process(input.substringBefore(' '), input.substringAfter(' ', ""), permissionObject, source)
     }
 
@@ -92,7 +116,7 @@ class CommandlinManager<S, P> {
      * This function will throw an IllegalStateException if requireCommandPermission is set and
      * the command does not have a permission verifier set in its lambda.
      */
-    fun command(id: String, incFun: Command<S, P>.() -> Unit) {
+    fun command(id: String, incFun: Command<S, P>.() -> Any) {
         if (findMatchingCommand(id)!=null) {
             println("Failed to add a command that already exists or has an alias: $id")
             return
@@ -130,7 +154,7 @@ class Command<S, P>(var name: String) {
     /**
      * The actual function/lambda to execute
      */
-    var commandFunction: ((List<String>, S?) -> Unit)? = null
+    var commandFunction: ((List<String>, S?) -> Any)? = null
     /**
      * Optional map for storing instanced data for the command without a need for subclassing.
      * Note that this data is unique to the Command object, not to each individual call.
@@ -147,7 +171,7 @@ class Command<S, P>(var name: String) {
     fun verifyArgsCount(count: Int): Boolean {
         if (expectedArgsMin<0 && expectedArgsMax<0) return true
         if (expectedArgsMin>count) return false
-        if (expectedArgsMax<count) return false
+        if (expectedArgsMax in 0 until count) return false //If argsmax is above -1 and above count then fail
         return true
     }
 
@@ -161,7 +185,7 @@ class Command<S, P>(var name: String) {
      * as the permission verifier should be called and tested for
      * a true boolean prior to this function being executed.
      */
-    fun func(incFunction: ((List<String>, S?) -> Unit)) {
+    fun func(incFunction: ((List<String>, S?) -> Any)) {
         this.commandFunction = incFunction
     }
 }
