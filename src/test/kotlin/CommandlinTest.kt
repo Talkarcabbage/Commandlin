@@ -5,7 +5,7 @@ import org.junit.Assert.*
 class CommandlinTest {
     @Test
     fun commandlinTest() {
-        val cmdMan = commandlin<SourceTest, Int> {
+        val cmdMan = commandlin<List<String>, Int, SourceTest?> {
             command("basictest") {
                 permissionVerifier = BasicPermissionVerifier(8)
                 func { _, src->
@@ -13,16 +13,15 @@ class CommandlinTest {
                 }
             }
             command("argstest") {
-                this.expectedArgsMax=1
-                this.expectedArgsMin=1
+                this.argumentsVerifier=ArgumentCountVerifier(1,1)
                 func { args, _ ->
-                    println("We got one arg successfully:${args[0]}")
+                    println("We got ${args.size} arg successfully:${args[0]}")
                 }
             }
             command("argstestmin") {
-                this.expectedArgsMin=1
+                this.argumentsVerifier=ArgumentCountVerifier(1,1000)
                 func { args, _ ->
-                    println("We got one arg successfully:${args[0]}")
+                    println("We got ${args.size} arg successfully:${args[0]}")
                 }
             }
             command("warnmemissing") {
@@ -48,16 +47,21 @@ class CommandlinTest {
                     }
                 }
             }
+            command("thiscommandfails") {
+                funcNP {
+                    return@funcNP CommandResult.GENERIC_FAILURE
+                }
+            }
         }
-        val nothingTest = commandlin<Nothing, Nothing> {
+        val nothingTest = commandlin<Nothing?, Nothing?, Nothing?> {
             command("potato") {
                 func { _, _ ->
                     println("I have Nothing!")
                 }
             }
         }
-        assertEquals( CommandResult.SUCCESS, cmdMan.process("argstestmin asdf",0, null))
-        nothingTest.process("ayylmao","", null,null)
+        assertEquals( CommandResult.SUCCESS, cmdMan.process("argstestmin", listOf("asdf"), 0, null))
+        nothingTest.process("ayylmao",null, null,null)
         assertEquals(cmdMan.process("basictest", listOf(), 8, SourceTest("Hi I'm a test")), CommandResult.SUCCESS)
         assertEquals(cmdMan.process("basictest", listOf(), 8, SourceTest("Hi I'm a test")), CommandResult.SUCCESS)
         assertEquals(cmdMan.process("basictest", listOf(), 8, null), CommandResult.SUCCESS)
@@ -65,20 +69,13 @@ class CommandlinTest {
         assertEquals(cmdMan.process("argstest", listOf(), 0, null), CommandResult.INVALID_ARGUMENTS)
         assertEquals(cmdMan.process("argstest", listOf(""), 0, null), CommandResult.SUCCESS)
         assertEquals(cmdMan.process("argstest", listOf("",""), 0, null), CommandResult.INVALID_ARGUMENTS)
-        assertEquals( CommandResult.INVALID_ARGUMENTS, cmdMan.process("argstestmin",0, null))
-        assertEquals(CommandResult.SUCCESS, cmdMan.process("argstest", "asdf",0, null))
-        assertEquals(CommandResult.SUCCESS, cmdMan.process("argstest test", 0, null))
-        assertEquals(cmdMan.process("asdf"), CommandResult.NO_MATCHING_COMMAND)
-        assertEquals(CommandResult.NO_COMMAND_FUNCTION, cmdMan.process("warnmemissing"))
-        nothingTest.process("potato", listOf())
-        assertEquals(CommandResult.SUCCESS, cmdMan.process("aliased"))
-        assertEquals(CommandResult.INVALID_ARGUMENTS, cmdMan.process("returntest"))
-        assertEquals(CommandResult.SUCCESS, cmdMan.process("returntypetest"))
+        nothingTest.process("potato", null, null, null)
+        assertEquals(cmdMan.process("thiscommandfails", listOf(), 0, null), CommandResult.GENERIC_FAILURE)
     }
 
     @Test
     fun authTest() {
-        val authTestOptional = commandlin<SourceTest, Int> {
+        val authTestOptional = commandlin<List<String>, Int, SourceTest?> {
             command("noauth") {
                 func { _, _ ->
                     println("I should execute! I have no auth object!")
@@ -98,7 +95,7 @@ class CommandlinTest {
                 }
             }
         }
-        val authTestMandatory = commandlin<SourceTest, Int> {
+        val authTestMandatory = commandlin<List<String>, Int, SourceTest?> {
             requireCommandPermission=true
             var noAuthProvidedPassed=false
             try {
@@ -127,25 +124,56 @@ class CommandlinTest {
                 }
             }
         }
-        assertEquals(CommandResult.SUCCESS, authTestOptional.process("noauth"))
-        assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestOptional.process("underauth"))
-        assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestOptional.process("underauth", 1))
-        assertEquals(CommandResult.SUCCESS, authTestOptional.process("allowedauth", 5))
+        assertEquals(CommandResult.SUCCESS, authTestOptional.process("noauth", listOf(), 0, null))
+        assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestOptional.process("underauth", listOf(), 0, null))
+        assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestOptional.process("underauth", listOf(),  1, null))
+        assertEquals(CommandResult.SUCCESS, authTestOptional.process("allowedauth", listOf(), 5, null))
 
-        assertEquals(CommandResult.NO_MATCHING_COMMAND, authTestMandatory.process("noauth"))
-        assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestMandatory.process("underauth"))
-        assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestMandatory.process("underauth", 1))
-        assertEquals(CommandResult.SUCCESS, authTestMandatory.process("allowedauth", 5))
+        assertEquals(CommandResult.NO_MATCHING_COMMAND, authTestMandatory.process("noauth", listOf(), 0, null))
+        assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestMandatory.process("underauth", listOf(), 0, null))
+        assertEquals(CommandResult.INSUFFICIENT_PRIVILEGES, authTestMandatory.process("underauth", listOf(), 1, null))
+        assertEquals(CommandResult.SUCCESS, authTestMandatory.process("allowedauth", listOf(), 5, null))
     }
 
-    fun returnTypeTwo(): String {
-        return ""
+    @Test
+    fun testOptionals() {
+        val cmdMan = commandlin<List<String>, Int, SourceTest> {
+            command("noargs") {
+                funcNA {
+                    println("Noargs from $it")
+                }
+            }
+            command("nosrc") {
+                funcNS {
+                    println("We got only args ${it[0]}")
+                }
+            }
+            command("noparams") {
+                funcNP {
+                    println("We got no parameters at all!")
+                }
+            }
+        }
+        assertEquals(CommandResult.SUCCESS, cmdMan.process("noargs noargs", listOf("noargs"), 0, source=SourceTest("srconly")))
     }
 
-    fun returnTypeOne() {
+    fun returnTypeTwo(): String { return ""  }
+    fun returnTypeOne() {  }
 
+    @Test
+    fun testMisc() {
+        val cmd = commandlin<List<String>, Nothing?, Author?> {
+            command("test") {
+                func { args, source ->
+                    println("We have ${args.size} arguments from $source")
+                }
+            }
+        }
+        val someArguments = listOf("Arg one", "Arg two")
+        val author = Author("Steve")
+        println(cmd.process("test", someArguments, null, author))
     }
-
 }
 
 class SourceTest(var name: String)
+class Author(var name: String)

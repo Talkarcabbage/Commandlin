@@ -1,42 +1,61 @@
 package io.github.talkarcabbage.commandlin
 
+/**
+ * Represents the result of a command.
+ *
+ * These values are returned from the [CommandlinManager.process] function to determine
+ * whether a command executed successfully or not.
+ */
 enum class CommandResult {
     SUCCESS,
     INSUFFICIENT_PRIVILEGES,
     NO_MATCHING_COMMAND,
     INVALID_ARGUMENTS,
-    NO_COMMAND_FUNCTION
+    NO_COMMAND_FUNCTION,
+    GENERIC_FAILURE
 }
 
 
 
 /**
- * S: The type representing the source of the command. Can be Any? type. Passed to command when executed.
- * P: The type used by the PermissionVerifier implementation used. The built-in type,
+ *
+ * Creates an instance of the command manager, with a DSL type structure for convenience.
+ *
+ * A: The type that holds the arguments passed to the command. This is often a list of strings in many cases,
+ * but is left generic for various use cases.
+ *
+ * P: The type used by the PermissionVerifier implementation used. The built-in implementation,
  * BasicPermissionVerifier, uses Int as its type.
- * If you do not need a source and/or permission type, passing the Nothing type should work. Most uses of
- * these generics are nullable, as well.
+ *
+ * S: The type representing the source of the command. Can be any type. Passed to command when executed.
+ *
+ * If you do not need a source and/or permission type, passing the [Nothing]? type should work.
  *
  */
-fun <S, P> commandlin(incFun: CommandlinManager<S, P>.() -> Any?): CommandlinManager<S, P> {
-    val commandlinBuilder = CommandlinManager<S, P>()
+fun <A, P, S> commandlin(incFun: CommandlinManager<A, P, S>.() -> Any?): CommandlinManager<A, P, S> {
+    val commandlinBuilder = CommandlinManager<A, P, S>()
     commandlinBuilder.incFun()
     return commandlinBuilder
 }
 
-class CommandlinManager<S, P> {
-    val commands: MutableList<Command<S, P>> = mutableListOf()
+class CommandlinManager<A, P, S> {
+    val commands: MutableMap<String, Command<A, P, S>> = mutableMapOf()
     /**
-     * If true, a command must have a permissions assigned during creation, or it will not be added.
-     * It cannot be disabled once set to enabled!
+     * If true, every command must have a permissions object assigned during creation, or it will not be added.
+     * It cannot be disabled after being enabled!
      */
     var requireCommandPermission=false
         set(enabled) {
-            if (enabled)
-                field = enabled
+            if (enabled) field = enabled
         }
 
-    private fun addCommand(com: Command<S, P>) = commands.add(com)
+    /**
+     * If set, this registrar is called when a command is added to
+     * the command manager.
+     */
+    var commandRegistrar: CommandRegistrar<A, P, S>? = null
+
+    private fun addCommand(id: String, com: Command<A, P, S>) = commands.put(id, com)
     /**
      * Process the given command, with arguments given as an Array of strings.
      * Execution flows as follows.
@@ -51,14 +70,15 @@ class CommandlinManager<S, P> {
      * do not match requirements.
      *
      */
-    fun process(commandId: String, args: List<String>, permissionObject: P?=null, source: S?=null): CommandResult {
-        val command: Command<S, P>? = findMatchingCommand(commandId)
+    fun process(commandId: String, args: A, permissionObject: P, source: S): CommandResult {
+        val command: Command<A, P, S>? = findMatchingCommand(commandId)
         if (command != null) {
-            val cpv=command.permissionVerifier
+            val cpv=command.permissionVerifier //Temporary variables to help with some thread safety nullable stuff
+            val argV = command.argumentsVerifier
             if (!(command.permissionVerifier==null || (cpv!=null && permissionObject!=null && cpv.checkPermission(command, permissionObject)))) {
                 return CommandResult.INSUFFICIENT_PRIVILEGES
             }
-            if (!command.verifyArgsCount(args.size)) {
+            if (argV!=null && !(argV.verifyArguments(args))) {
                 return CommandResult.INVALID_ARGUMENTS
             }
             val cmd = command.commandFunction
@@ -72,41 +92,17 @@ class CommandlinManager<S, P> {
             return CommandResult.NO_MATCHING_COMMAND
         }
     }
-    /**
-     * Process the given command, with arguments given as a single string.
-     * The command will not execute if expected arguments are set and
-     * do not match requirements.
-     * Convenience method. Splits the arguments by spaces, passing them to process(String, List<String>, P, S)
-     */
-    fun process(commandId: String, arg: String, permissionObject: P?=null, source: S?=null): CommandResult {
-        println("Processing middle tier with $arg")
-        return if (arg.trim()=="") {
-            println("Processing args==\"\"")
-            process(commandId,listOf(), permissionObject, source)
-        } else {
-            println("Processing args!=\"\" with split results size of ${arg.split(' ').size}")
-            process(commandId, arg.split(' '), permissionObject, source)
-        }
-    }
-    /**
-     * Process the given command, with arguments given as a single string.
-     * The command will not execute if expected arguments are set and
-     * do not match requirements.
-     * Convenience method. First argument is treated as commandId.
-     * Splits the remaining arguments by space and passes them to process(String, String, P, S)
-     */
-    fun process(input: String, permissionObject: P?=null, source: S?=null): CommandResult {
-        println("Processed command as [${input.substringBefore(' ')}] and args as [${input.substringAfter(' ', "")}]")
-        return process(input.substringBefore(' '), input.substringAfter(' ', ""), permissionObject, source)
-    }
 
-    fun findMatchingCommand(commandId: String): Command<S, P>? {
-        for (cmd in commands) {
-            if (cmd.name==commandId || cmd.aliases.contains(commandId)) {
-                return cmd
-            }
+    /**
+     * This function returns a matching command
+     */
+    private fun findMatchingCommand(commandID: String, checkAliases: Boolean = true): Command<A, P, S>? {
+        val foundCmd =  commands.getOrDefault(commandID, null)
+        return if (foundCmd == null && checkAliases) {
+            commands.values.firstOrNull {it.aliases.contains(commandID)}
+        } else {
+            return foundCmd
         }
-        return null
     }
 
     /**
@@ -116,51 +112,62 @@ class CommandlinManager<S, P> {
      * This function will throw an IllegalStateException if requireCommandPermission is set and
      * the command does not have a permission verifier set in its lambda.
      */
-    fun command(id: String, incFun: Command<S, P>.() -> Any?) {
+    fun command(id: String, incFun: Command<A, P, S>.() -> Any?) {
         if (findMatchingCommand(id)!=null) {
             println("Failed to add a command that already exists or has an alias: $id")
             return
         }
-        val newCmd = Command<S, P>(id)
+        val newCmd = Command<A, P, S>(id)
         newCmd.incFun()
         if (requireCommandPermission && newCmd.permissionVerifier==null) {
-            throw IllegalStateException("Attempted to add a command with no permission verifier: ${newCmd.name}")
+            throw IllegalStateException("Attempted to add a command with no permission verifier: ${newCmd.id}")
         }
         if (newCmd.commandFunction==null) {
-            println("The following command was added with no command function: ${newCmd.name}")
+            println("The following command was added with no command function, so it will no-op: ${newCmd.id}")
         }
-        addCommand(newCmd)
+        addCommand(id, newCmd)
+        commandRegistrar?.handleRegistration(newCmd)
+    }
+
+    /**
+     * Can be called if there is a need to remove a command from the manager.
+     * This function will also call the [CommandRegistrar.handleDeregistration] function
+     * if there is an attached registrar, if a matching command was removed.
+     * This function will do nothing if there was no matching command.
+     * This function does NOT check aliases.
+     */
+    fun removeCommand(id: String) {
+        val removed = commands.remove(id)
+        if (removed != null) commandRegistrar?.handleDeregistration(removed)
     }
 }
 
-class Command<S, P>(var name: String) {
-    /**
-     * Set the expected minimum argument count. The command will fail if
-     * this is set to a non-negative value and the number of arguments does not
-     * exceed this value.
-     */
-    var expectedArgsMin = -1
-    /**
-     * Set the expected maximum argument count. The command will fail if
-     * this is set to a non-negative value and the number of arguments does not
-     * fall under or equal to this value.
-     */
-    var expectedArgsMax = -1
+/**
+ * An implementation to hold the logic to manage individual commands and their functions.
+ * S refers to the data type of the source object.
+ * P refers to the data type of object used in the permission verifier, if it is used.
+ * A refers to the data type of the command's arguments. Can be as simple as a string, or any
+ * object by convenience.
+ *
+ */
+class Command<A, P, S>(var id: String) {
+    var argumentsVerifier: ArgumentsVerifier<A>? = null
     /**
      * The permissions verifier object for this command. If it is non-null, this
      * verifier will be called with the given P object and must return true for the command to execute.
      */
     var permissionVerifier: PermissionVerifier<P>? = null
     /**
-     * The actual function/lambda to execute
+     * The actual function/lambda to execute.
+     * Receives the Arguments and the Source of the call as parameters.
      */
-    var commandFunction: ((List<String>, S?) -> Any?)? = null
+    var commandFunction: ((A, S) -> Any?)? = null
     /**
      * Optional map for storing instanced data for the command without a need for subclassing.
      * Note that this data is unique to the Command object, not to each individual call.
      * Properties object is initialized lazily using kotlin's lazy delegate.
      */
-    val properties: MutableMap<String, String> by lazy { HashMap<String, String>() }
+    val properties: MutableMap<String, Any> by lazy { HashMap<String, Any>() }
     /**
      * Alternative command names that will also activate this command.
      * Matching-wise they function the same as the base name of the command.
@@ -168,26 +175,62 @@ class Command<S, P>(var name: String) {
      */
     val aliases: MutableList<String> by lazy {mutableListOf<String>()}
 
-    fun verifyArgsCount(count: Int): Boolean {
-        if (expectedArgsMin<0 && expectedArgsMax<0) return true
-        if (expectedArgsMin>count) return false
-        if (expectedArgsMax in 0 until count) return false //If argsmax is above -1 and above count then fail
-        return true
-    }
-
     fun alias(name: String) {
         aliases.add(name)
     }
 
     /**
-     * The function of the command. Note that at this point
-     * we are assuming we have permission to run the command,
-     * as the permission verifier should be called and tested for
-     * a true boolean prior to this function being executed.
+     * The function of the command. This function is called when
+     * the command with a matching ID or alias is sent to [CommandlinManager.process],
+     * after the permissions verifier, if present, has ensured the command can be executed,
+     * and the arguments verifier, if present, has validated the command's arguments.
      */
-    fun func(incFunction: ((List<String>, S?) -> Any?)) {
+    fun func(incFunction: ((A, S) -> Any?)) {
         this.commandFunction = incFunction
     }
+
+    /**
+     * Takes in a function for commands that do not have or do not need to process arguments.
+     * Allows for excluding parameters declaration, allowing for using just a parameter
+     * which represents the Source object.
+     * Function name is separate from funcNS to prevent a duplicate signature situation.
+     * @see [Command.func]
+     */
+    fun funcNA(incFunctionNoArgs: ((S?) -> Any?)) {
+        this.func {_, src ->
+            incFunctionNoArgs(src)
+        }
+    }
+
+    /**
+     * Takes in a function for commands that do not need to process a Source object.
+     * Allows for excluding explicit parameter declarations, allowing for using just a parameter
+     * which represents the passed arguments.
+     *
+     * Function name is separate from funcNA to prevent a duplicate signature situation (S=List<String>)
+     * @see [Command.func]
+     */
+    fun funcNS(incFunctionNoS: ((A)->Any?)) {
+        this.func {args, _ ->
+            incFunctionNoS(args)
+        }
+    }
+
+    /**
+     * Takes in a function for commands that does not process parameters.
+     * Useful for avoiding redundant declarations of variables
+     * The presence of arguments or a source object are ignored entirely.
+     * Function name is separate from func() to avoid confusing the two should
+     * arguments accidentally be excluded when declaring a command's function.
+     *
+     * @see [Command.func]
+     */
+    fun funcNP(incFunction: ()->Any?) {
+        this.commandFunction = {_,_->
+            incFunction()
+        }
+    }
+
 }
 
 /**
@@ -196,15 +239,68 @@ class Command<S, P>(var name: String) {
  * object to verify. The provided implementation is [BasicPermissionVerifier]
  */
 interface PermissionVerifier<T> {
-    fun checkPermission(command: Command<*, T>, authToken: T): Boolean
+    fun checkPermission(command: Command<*, T, *>, authToken: T): Boolean
 }
 
 /**
  * A simple permission verifier for commands. It returns true if the value
  * provided is higher than or equal to the number it is instantiated with.
  */
-class BasicPermissionVerifier(var requiredLevel: Int): PermissionVerifier<Int>  {
-    override fun checkPermission(command: Command<*, Int>, authToken: Int): Boolean {
+class BasicPermissionVerifier(val requiredLevel: Int): PermissionVerifier<Int>  {
+    override fun checkPermission(command: Command<*, Int, *>, authToken: Int): Boolean {
         return (authToken>=this.requiredLevel)
     }
+}
+
+/**
+ * An interface for optionally implementing an arguments verifier for a command.
+ *
+ */
+interface ArgumentsVerifier<A> {
+    /**
+     * This function is called by the command manager prior to the command
+     * being executed. If it returns false, the command will not execute and
+     * will return an INVALID_ARGUMENTS result.
+     * For a simple implementation that receives the arguments and counts them against
+     * a min and max expected count, see
+     *
+     */
+    fun verifyArguments(args: A): Boolean
+}
+
+/**
+ * An instance of this interface can be added to a command manager, and it
+ * is called when a command is added to the manager. This allows for easy
+ * supplemental registration of commands, such as adding them to an api or
+ * setting up callbacks.
+ * This interface is optional and is not required for operation.
+ */
+interface CommandRegistrar<A, P, S> {
+    /**
+     * Called when a command is added to the manager so that it can be
+     * managed in any additional ways needed.
+     */
+    fun handleRegistration(command: Command<A, P, S>)
+    fun handleDeregistration(command: Command<A, P, S>)
+}
+
+/**
+ * This implementation of ArgumentsVerifier ensures the given argument count falls between
+ * the min and max specified.
+ */
+class ArgumentCountVerifier(val minArgs: Int, val maxArgs: Int): ArgumentsVerifier<List<String>> {
+    override fun verifyArguments(args: List<String>): Boolean {
+        val argsCount = args.size
+        return (argsCount in minArgs.. maxArgs)
+    }
+}
+
+/**
+ * A convenience function that splits a string into its first delimited (space by default) substring
+ * and a list of subsequent strings delimited by that character.
+ * The resulting return format is a Pair (String, List<String>).
+ * For example, the string "foo bar fizz" would return Pair("Foo", List("bar", "fizz"))
+ */
+fun evaluateArguments(argString: String, delimiter: String = " "): Pair<String, List<String>> {
+    return Pair(argString.substringBefore(delimiter), argString.substringAfter(delimiter, missingDelimiterValue = "").split(delimiter))
 }
