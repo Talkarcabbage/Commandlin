@@ -1,4 +1,5 @@
-import io.github.talkarcabbage.commandlin.*
+package io.github.talkarcabbage.commandlin
+
 import org.junit.Test
 import org.junit.Assert.*
 
@@ -154,7 +155,8 @@ class CommandlinTest {
                 }
             }
         }
-        assertEquals(CommandResult.SUCCESS, cmdMan.process("noargs noargs", listOf("noargs"), 0, source=SourceTest("srconly")))
+        val cmdPair = evaluateArguments("noargs noargs")
+        assertEquals(CommandResult.SUCCESS, cmdMan.process(cmdPair.first, cmdPair.second, 0, source= SourceTest("srconly")))
     }
 
     fun returnTypeTwo(): String { return ""  }
