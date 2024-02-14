@@ -166,6 +166,11 @@ class CommandlinTest {
     fun testMisc() {
         val cmd = commandlin<List<String>, Nothing?, Author?> {
             command("test") {
+                autocompleteHandler = AutocompleteHandler {
+                    _ ->
+                    println()
+                    listOf(listOf("testArg"))
+                }
                 func { args, source ->
                     println("We have ${args.size} arguments from $source")
                 }
@@ -173,6 +178,10 @@ class CommandlinTest {
         }
         val someArguments = listOf("Arg one", "Arg two")
         val author = Author("Steve")
+        println(cmd.getAutocomplete("test", listOf()))
+        println((cmd.getAutocomplete("test", listOf())))
+        val (first) = (cmd.getAutocomplete("test", listOf()))!!
+        assertTrue(first[0]=="testArg")
         println(cmd.process("test", someArguments, null, author))
     }
 }

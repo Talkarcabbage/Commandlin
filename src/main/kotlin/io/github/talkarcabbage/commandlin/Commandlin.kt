@@ -32,7 +32,7 @@ enum class CommandResult {
  * If you do not need a source and/or permission type, passing the [Nothing]? type should work.
  *
  */
-fun <A, P, S> commandlin(incFun: CommandlinManager<A, P, S>.() -> Any?): CommandlinManager<A, P, S> {
+fun <A, P, S> commandlin(incFun: CommandlinManager<A, P, S>.() -> Unit): CommandlinManager<A, P, S> {
     val commandlinBuilder = CommandlinManager<A, P, S>()
     commandlinBuilder.incFun()
     return commandlinBuilder
@@ -46,7 +46,7 @@ class CommandlinManager<A, P, S> {
      */
     var requireCommandPermission=false
         set(enabled) {
-            if (enabled) field = enabled
+            if (enabled) field = true
         }
 
     /**
@@ -91,6 +91,11 @@ class CommandlinManager<A, P, S> {
         } else {
             return CommandResult.NO_MATCHING_COMMAND
         }
+    }
+
+    fun getAutocomplete(commandID: String, args: A): List<A>? {
+        val cmd = findMatchingCommand(commandID)
+        return cmd?.autocompleteHandler?.getSuggestions(args)
     }
 
     /**
@@ -157,6 +162,8 @@ class Command<A, P, S>(var id: String) {
      * verifier will be called with the given P object and must return true for the command to execute.
      */
     var permissionVerifier: PermissionVerifier<P>? = null
+
+    var autocompleteHandler: AutocompleteHandler<A>? = null
     /**
      * The actual function/lambda to execute.
      * Receives the Arguments and the Source of the call as parameters.
@@ -167,13 +174,13 @@ class Command<A, P, S>(var id: String) {
      * Note that this data is unique to the Command object, not to each individual call.
      * Properties object is initialized lazily using kotlin's lazy delegate.
      */
-    val properties: MutableMap<String, Any> by lazy { HashMap<String, Any>() }
+    val properties: MutableMap<String, Any> by lazy { HashMap() }
     /**
      * Alternative command names that will also activate this command.
      * Matching-wise they function the same as the base name of the command.
      * Initialized lazily using kotlin's lazy delegate.
      */
-    val aliases: MutableList<String> by lazy {mutableListOf<String>()}
+    val aliases: MutableList<String> by lazy {mutableListOf()}
 
     fun alias(name: String) {
         aliases.add(name)
@@ -256,16 +263,25 @@ class BasicPermissionVerifier(val requiredLevel: Int): PermissionVerifier<Int>  
  * An interface for optionally implementing an arguments verifier for a command.
  *
  */
-interface ArgumentsVerifier<A> {
+fun interface ArgumentsVerifier<A> {
     /**
      * This function is called by the command manager prior to the command
      * being executed. If it returns false, the command will not execute and
      * will return an INVALID_ARGUMENTS result.
      * For a simple implementation that receives the arguments and counts them against
-     * a min and max expected count, see
+     * a min and max expected count, see [ArgumentCountVerifier]
      *
      */
     fun verifyArguments(args: A): Boolean
+}
+
+fun interface AutocompleteHandler<A> {
+    /**
+     * This function can be called by requesting autocomplete predictions
+     * from the command manager when a command and arguments are passed in.
+     *
+     */
+    fun getSuggestions(args: A): List<A>
 }
 
 /**
