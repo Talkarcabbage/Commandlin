@@ -15,31 +15,40 @@ enum class CommandResult {
     GENERIC_FAILURE
 }
 
-
+fun simpleCommandlin(incFun: CommandlinManager<List<String>?, Nothing?, Nothing?, Nothing?>.() -> Unit): CommandlinManager<List<String>?, Nothing?, Nothing?, Nothing?> {
+    val commandlinBuilder = CommandlinManager<List<String>?, Nothing?, Nothing?, Nothing?>()
+    commandlinBuilder.incFun()
+    return commandlinBuilder
+}
 
 /**
  *
  * Creates an instance of the command manager, with a DSL type structure for convenience.
  *
- * A: The type that holds the arguments passed to the command. This is often a list of strings in many cases,
+ * [A]: The type that holds the arguments passed to the command. This is often a list of strings in many cases,
  * but is left generic for various use cases.
  *
- * P: The type used by the PermissionVerifier implementation used. The built-in implementation,
+ * [P]: The type used by the PermissionVerifier implementation used. The built-in implementation,
  * BasicPermissionVerifier, uses Int as its type.
  *
- * S: The type representing the source of the command. Can be any type. Passed to command when executed.
+ * [S]: The type representing the source of the command. Can be any type. Passed to command when executed.
+ * 
+ * [PR]: A type for an object that can be attached to each command, making storing data or functionality per-command
+ * easier. Abbreviation for Properties.
  *
- * If you do not need a source and/or permission type, passing the [Nothing]? type should work.
+ * If you do not need a source, properties, and/or permission type, passing the [Nothing]? type should work.
+ * For convenience, there is a simpleCommandlin function that uses a List<String> argument type, and [Nothing]? for
+ * permission, source, and property types.
  *
  */
-fun <A, P, S> commandlin(incFun: CommandlinManager<A, P, S>.() -> Unit): CommandlinManager<A, P, S> {
-    val commandlinBuilder = CommandlinManager<A, P, S>()
+fun <A, P, S, PR> commandlin(incFun: CommandlinManager<A, P, S, PR>.() -> Unit): CommandlinManager<A, P, S, PR> {
+    val commandlinBuilder = CommandlinManager<A, P, S, PR>()
     commandlinBuilder.incFun()
     return commandlinBuilder
 }
 
-class CommandlinManager<A, P, S> {
-    val commands: MutableMap<String, Command<A, P, S>> = mutableMapOf()
+class CommandlinManager<A, P, S, PR> {
+    val commands: MutableMap<String, Command<A, P, S, PR>> = mutableMapOf()
     /**
      * If true, every command must have a permissions object assigned during creation, or it will not be added.
      * It cannot be disabled after being enabled!
@@ -53,9 +62,9 @@ class CommandlinManager<A, P, S> {
      * If set, this registrar is called when a command is added to
      * the command manager.
      */
-    var commandRegistrar: CommandRegistrar<A, P, S>? = null
+    var commandRegistrar: CommandRegistrar<A, P, S, PR>? = null
 
-    private fun addCommand(id: String, com: Command<A, P, S>) = commands.put(id, com)
+    private fun addCommand(id: String, com: Command<A, P, S, PR>) = commands.put(id, com)
     /**
      * Process the given command, with arguments given as an Array of strings.
      * Execution flows as follows.
@@ -71,11 +80,11 @@ class CommandlinManager<A, P, S> {
      *
      */
     fun process(commandId: String, args: A, permissionObject: P, source: S): CommandResult {
-        val command: Command<A, P, S>? = findMatchingCommand(commandId)
+        val command: Command<A, P, S, PR>? = findMatchingCommand(commandId)
         if (command != null) {
             val cpv=command.permissionVerifier //Temporary variables to help with some thread safety nullable stuff
             val argV = command.argumentsVerifier
-            if (!(command.permissionVerifier==null || (cpv!=null && permissionObject!=null && cpv.checkPermission(command, permissionObject)))) {
+            if (!(cpv==null || (permissionObject!=null && cpv.checkPermission(command, permissionObject)))) {
                 return CommandResult.INSUFFICIENT_PRIVILEGES
             }
             if (argV!=null && !(argV.verifyArguments(args))) {
@@ -101,7 +110,7 @@ class CommandlinManager<A, P, S> {
     /**
      * This function returns a matching command
      */
-    private fun findMatchingCommand(commandID: String, checkAliases: Boolean = true): Command<A, P, S>? {
+    private fun findMatchingCommand(commandID: String, checkAliases: Boolean = true): Command<A, P, S, PR>? {
         val foundCmd =  commands.getOrDefault(commandID, null)
         return if (foundCmd == null && checkAliases) {
             commands.values.firstOrNull {it.aliases.contains(commandID)}
@@ -117,12 +126,12 @@ class CommandlinManager<A, P, S> {
      * This function will throw an IllegalStateException if requireCommandPermission is set and
      * the command does not have a permission verifier set in its lambda.
      */
-    fun command(id: String, incFun: Command<A, P, S>.() -> Any?) {
+    fun command(id: String, incFun: Command<A, P, S, PR>.() -> Any?) {
         if (findMatchingCommand(id)!=null) {
             println("Failed to add a command that already exists or has an alias: $id")
             return
         }
-        val newCmd = Command<A, P, S>(id)
+        val newCmd = Command<A, P, S, PR>(id)
         newCmd.incFun()
         if (requireCommandPermission && newCmd.permissionVerifier==null) {
             throw IllegalStateException("Attempted to add a command with no permission verifier: ${newCmd.id}")
@@ -139,7 +148,7 @@ class CommandlinManager<A, P, S> {
      * This function will also call the [CommandRegistrar.handleDeregistration] function
      * if there is an attached registrar, if a matching command was removed.
      * This function will do nothing if there was no matching command.
-     * This function does NOT check aliases.
+     * This function does NOT check aliases and will NOT remove commands by their alias.
      */
     fun removeCommand(id: String) {
         val removed = commands.remove(id)
@@ -149,19 +158,19 @@ class CommandlinManager<A, P, S> {
 
 /**
  * An implementation to hold the logic to manage individual commands and their functions.
- * S refers to the data type of the source object.
- * P refers to the data type of object used in the permission verifier, if it is used.
- * A refers to the data type of the command's arguments. Can be as simple as a string, or any
+ * [S] refers to the data type of the source object.
+ * [P] refers to the data type of object used in the permission verifier, if it is used.
+ * [A] refers to the data type of the command's arguments. Can be as simple as a string, or any
  * object by convenience.
- *
+ * [PR] refers to a properties object type that can be attached to each Command.
  */
-class Command<A, P, S>(var id: String) {
+class Command<A, P, S, PR>(var id: String) {
     var argumentsVerifier: ArgumentsVerifier<A>? = null
     /**
      * The permissions verifier object for this command. If it is non-null, this
      * verifier will be called with the given P object and must return true for the command to execute.
      */
-    var permissionVerifier: PermissionVerifier<P>? = null
+    var permissionVerifier: PermissionVerifier<P, PR>? = null
 
     var autocompleteHandler: AutocompleteHandler<A>? = null
     /**
@@ -170,11 +179,10 @@ class Command<A, P, S>(var id: String) {
      */
     var commandFunction: ((A, S) -> Any?)? = null
     /**
-     * Optional map for storing instanced data for the command without a need for subclassing.
-     * Note that this data is unique to the Command object, not to each individual call.
-     * Properties object is initialized lazily using kotlin's lazy delegate.
+     * A generic typed object that allows for arbitrary data-storing or functionality per each command.
      */
-    val properties: MutableMap<String, Any> by lazy { HashMap() }
+    var properties: PR? = null
+
     /**
      * Alternative command names that will also activate this command.
      * Matching-wise they function the same as the base name of the command.
@@ -245,16 +253,16 @@ class Command<A, P, S>(var id: String) {
  * to check whether a command is allowed to execute given a specified
  * object to verify. The provided implementation is [BasicPermissionVerifier]
  */
-interface PermissionVerifier<T> {
-    fun checkPermission(command: Command<*, T, *>, authToken: T): Boolean
+interface PermissionVerifier<T, PR> {
+    fun checkPermission(command: Command<*, T, *, PR>, authToken: T): Boolean
 }
 
 /**
  * A simple permission verifier for commands. It returns true if the value
  * provided is higher than or equal to the number it is instantiated with.
  */
-class BasicPermissionVerifier(val requiredLevel: Int): PermissionVerifier<Int>  {
-    override fun checkPermission(command: Command<*, Int, *>, authToken: Int): Boolean {
+class BasicPermissionVerifier<PR>(val requiredLevel: Int): PermissionVerifier<Int, PR>  {
+    override fun checkPermission(command: Command<*, Int, *, PR>, authToken: Int): Boolean {
         return (authToken>=this.requiredLevel)
     }
 }
@@ -291,13 +299,13 @@ fun interface AutocompleteHandler<A> {
  * setting up callbacks.
  * This interface is optional and is not required for operation.
  */
-interface CommandRegistrar<A, P, S> {
+interface CommandRegistrar<A, P, S, PR> {
     /**
      * Called when a command is added to the manager so that it can be
      * managed in any additional ways needed.
      */
-    fun handleRegistration(command: Command<A, P, S>)
-    fun handleDeregistration(command: Command<A, P, S>)
+    fun handleRegistration(command: Command<A, P, S, PR>)
+    fun handleDeregistration(command: Command<A, P, S, PR>)
 }
 
 /**

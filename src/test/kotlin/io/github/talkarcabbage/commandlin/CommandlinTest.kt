@@ -6,7 +6,7 @@ import org.junit.Assert.*
 class CommandlinTest {
     @Test
     fun commandlinTest() {
-        val cmdMan = commandlin<List<String>, Int, SourceTest?> {
+        val cmdMan = commandlin<List<String>, Int, SourceTest?, Map<String, Any>> {
             command("basictest") {
                 permissionVerifier = BasicPermissionVerifier(8)
                 func { _, src->
@@ -54,7 +54,7 @@ class CommandlinTest {
                 }
             }
         }
-        val nothingTest = commandlin<Nothing?, Nothing?, Nothing?> {
+        val nothingTest = commandlin<Nothing?, Nothing?, Nothing?, Nothing?> {
             command("potato") {
                 func { _, _ ->
                     println("I have Nothing!")
@@ -76,7 +76,7 @@ class CommandlinTest {
 
     @Test
     fun authTest() {
-        val authTestOptional = commandlin<List<String>, Int, SourceTest?> {
+        val authTestOptional = commandlin<List<String>, Int, SourceTest?, Map<String, Any>> {
             command("noauth") {
                 func { _, _ ->
                     println("I should execute! I have no auth object!")
@@ -96,7 +96,7 @@ class CommandlinTest {
                 }
             }
         }
-        val authTestMandatory = commandlin<List<String>, Int, SourceTest?> {
+        val authTestMandatory = commandlin<List<String>, Int, SourceTest?, Map<String, Any>> {
             requireCommandPermission=true
             var noAuthProvidedPassed=false
             try {
@@ -138,7 +138,7 @@ class CommandlinTest {
 
     @Test
     fun testOptionals() {
-        val cmdMan = commandlin<List<String>, Int, SourceTest> {
+        val cmdMan = commandlin<List<String>, Int, SourceTest, Map<String, Any>> {
             command("noargs") {
                 funcNA {
                     println("Noargs from $it")
@@ -164,7 +164,7 @@ class CommandlinTest {
 
     @Test
     fun testMisc() {
-        val cmd = commandlin<List<String>, Nothing?, Author?> {
+        val cmd = commandlin<List<String>, Nothing?, Author?, Nothing?> {
             command("test") {
                 autocompleteHandler = AutocompleteHandler {
                     _ ->
@@ -184,7 +184,73 @@ class CommandlinTest {
         assertTrue(first[0]=="testArg")
         println(cmd.process("test", someArguments, null, author))
     }
+
+    @Test
+    fun testCustomProps() {
+        val cmd = commandlin<List<String>, Nothing?, Author?, PropertiesTest> {
+            command("test") {
+                properties = PropertiesTest("test", 5)
+                func { _, _ ->
+                    println("Our properties is ${properties?.commandPropertyString} and value of ${properties?.commandPropertyInt}")
+                }
+            }
+        }
+        cmd.process("test", listOf(), null, null)
+        val test = cmd.commands["test"]
+        assertEquals(5, test?.properties?.commandPropertyInt)
+    }
+
+    @Test
+    fun testSimple() {
+        val cmd = simpleCommandlin {
+            command("hello") {
+                funcNP {
+                    println(" world!")
+                }
+            }
+        }
+        cmd.process("hello", null,null,null)
+    }
+
+    @Test
+    fun testReadme() {
+        var readmeCMD: CommandlinManager<List<String>, Int, Author?, Props>? = null
+        readmeCMD = commandlin {
+            requireCommandPermission = true
+            command("test") {
+                properties = Props("This is a test command!")
+                permissionVerifier = BasicPermissionVerifier(1) //Built-in integer permission system - permission value in .process() must be equal or greater than this value to execute
+                func { args, source ->
+                    println("We have ${args.size} arguments from ${source?.name}: $args")
+                }
+            }
+            command("help") {
+                properties = Props("Print this help statement.")
+                permissionVerifier = BasicPermissionVerifier(0)
+                func { args, source ->
+                    readmeCMD?.commands?.forEach { (mapKey, command) ->
+                        println("${command.id} - ${command.properties?.commandHelpText}")
+                    }
+                }
+            }
+        }
+
+        val someArguments = listOf("Arg one", "Arg two")
+        val someOtherArguments = listOf("This is a test")
+        val author = Author("Steve")
+
+        val failedResult = readmeCMD.process("test", listOf("This should not print"), 0, author)
+        println(failedResult)
+        val successResult = readmeCMD.process("test", someArguments, 1, author)
+        println(successResult)
+        readmeCMD.process("test", someOtherArguments, 1, null)
+        readmeCMD.process("help", someArguments, 1, null)
+    }
+
 }
+
+class PropertiesTest(var commandPropertyString: String, var commandPropertyInt: Int)
 
 class SourceTest(var name: String)
 class Author(var name: String)
+class Props(var commandHelpText: String)
