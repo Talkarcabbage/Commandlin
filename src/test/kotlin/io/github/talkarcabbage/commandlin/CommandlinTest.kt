@@ -215,11 +215,13 @@ class CommandlinTest {
     @Test
     fun testReadme() {
         var readmeCMD: CommandlinManager<List<String>, Int, Author?, Props>? = null
+
         readmeCMD = commandlin {
             requireCommandPermission = true
+            commandRegistrar = ExternalRegistryHelper()
             command("test") {
                 properties = Props("This is a test command!")
-                permissionVerifier = BasicPermissionVerifier(1) //Built-in integer permission system - permission value in .process() must be equal or greater than this value to execute
+                permissionVerifier = BasicPermissionVerifier(1) //Built-in simple integer permission system - permission value in .process() must be equal or greater than this value to execute
                 func { args, source ->
                     println("We have ${args.size} arguments from ${source?.name}: $args")
                 }
@@ -249,8 +251,20 @@ class CommandlinTest {
 
 }
 
+class Author(var name: String)
+class Props(var commandHelpText: String)
+
+class ExternalRegistryHelper: CommandRegistrar<List<String>, Int, Author?, Props> {
+    override fun handleRegistration(command: Command<List<String>, Int, Author?, Props>) {
+        // exampleExternalTool.addCommand(command.id, otherParameters)
+        println("We added a command! ${command.id}")
+    }
+    override fun handleDeregistration(command: Command<List<String>, Int, Author?, Props>) {
+        // exampleExternalTool.removeCommand(command.id)
+        println("We removed a command! ${command.id}")
+    }
+}
+
 class PropertiesTest(var commandPropertyString: String, var commandPropertyInt: Int)
 
 class SourceTest(var name: String)
-class Author(var name: String)
-class Props(var commandHelpText: String)

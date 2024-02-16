@@ -15,6 +15,11 @@ enum class CommandResult {
     GENERIC_FAILURE
 }
 
+/**
+ * Creates a simplified instance of the command manager, with a DSL type structure for convenience.
+ * This simpler version uses a List<String> as its argument type, and Nothing? for its other types.
+ * An example use-case would be console applications, which would only need to process text arguments from input.
+ */
 fun simpleCommandlin(incFun: CommandlinManager<List<String>?, Nothing?, Nothing?, Nothing?>.() -> Unit): CommandlinManager<List<String>?, Nothing?, Nothing?, Nothing?> {
     val commandlinBuilder = CommandlinManager<List<String>?, Nothing?, Nothing?, Nothing?>()
     commandlinBuilder.incFun()
@@ -69,14 +74,21 @@ class CommandlinManager<A, P, S, PR> {
      * Process the given command, with arguments given as an Array of strings.
      * Execution flows as follows.
      *
-     * 1. If a command is not matched, CommandResult.NO_MATCHING_COMMAND is returned.
+     * 1. If a command is not matched, [CommandResult.NO_MATCHING_COMMAND] is returned.
      *
-     * 2. IF the command has an attached PermissionVerifier, it will be passed P. If the PermissionVerifier returns false,
-     * the command function will not execute and CommandResult.INSUFFICIENT_PRIVILEGES is returned.
+     * 2. IF the command has an attached PermissionVerifier, such as the [BasicPermissionVerifier] it will be passed P. If the PermissionVerifier returns false,
+     * the command function will not execute and [CommandResult.INSUFFICIENT_PRIVILEGES] is returned.
      * If NO permissionVerifier was set on the command, this step is skipped entirely.
      *
-     * 3. The command will not execute if expected arguments minimum or maximum are set and
-     * do not match requirements.
+     * 3. If the command has an arguments verifier, such as the [ArgumentCountVerifier], it will continue processing if
+     * that verifier returns true, otherwise returning [CommandResult.INVALID_ARGUMENTS]
+     *
+     * 4. If the command had no func{} attached to it, [CommandResult.NO_COMMAND_FUNCTION] will be returned.
+     *
+     * 5. The lambda function passed to the command via func{} or one of its derivatives is called.
+     *
+     * 6. If the lambda function provided in func{} returns a [CommandResult], it is returned. Otherwise,
+     * [CommandResult.SUCCESS] is returned.
      *
      */
     fun process(commandId: String, args: A, permissionObject: P, source: S): CommandResult {
@@ -102,13 +114,23 @@ class CommandlinManager<A, P, S, PR> {
         }
     }
 
+    /**
+     * This function can return a List<A> suggestions when
+     * passed a command ID and arguments for that function.
+     * If the matching command has an autocomplete handler,
+     * the results of calling it with the provided arguments will be
+     * returned.
+     *
+     * It may return an empty list, or null, if there is no matching command or autocomplete handler.
+     */
     fun getAutocomplete(commandID: String, args: A): List<A>? {
         val cmd = findMatchingCommand(commandID)
         return cmd?.autocompleteHandler?.getSuggestions(args)
     }
 
     /**
-     * This function returns a matching command
+     * This function returns a matching command by ID, and optionally by alias.
+     * Intended for internal use.
      */
     private fun findMatchingCommand(commandID: String, checkAliases: Boolean = true): Command<A, P, S, PR>? {
         val foundCmd =  commands.getOrDefault(commandID, null)
@@ -121,10 +143,16 @@ class CommandlinManager<A, P, S, PR> {
 
     /**
      * Add a command to the command manager.
-     * The commandlin instance should ideally be configured prior to calling this function.
+     * The commandlin instance should ideally be fully configured prior to calling this function.
      * The command may be configured from within this function.
-     * This function will throw an IllegalStateException if requireCommandPermission is set and
-     * the command does not have a permission verifier set in its lambda.
+     *
+     * This function will throw an IllegalStateException if requireCommandPermission(true) is set and
+     * the command does not have a permission verifier set from within its lambda.
+     *
+     * The command will not be added if one already exists with that ID string.
+     *
+     * A command CAN be added without an attached function, and matching calls to process() will return
+     * [CommandResult.NO_COMMAND_FUNCTION]
      */
     fun command(id: String, incFun: Command<A, P, S, PR>.() -> Any?) {
         if (findMatchingCommand(id)!=null) {
@@ -209,7 +237,11 @@ class Command<A, P, S, PR>(var id: String) {
      * Allows for excluding parameters declaration, allowing for using just a parameter
      * which represents the Source object.
      * Function name is separate from funcNS to prevent a duplicate signature situation.
+     *
+     * Abbreviation for Function-No-Arguments
+     *
      * @see [Command.func]
+     *
      */
     fun funcNA(incFunctionNoArgs: ((S?) -> Any?)) {
         this.func {_, src ->
@@ -222,8 +254,12 @@ class Command<A, P, S, PR>(var id: String) {
      * Allows for excluding explicit parameter declarations, allowing for using just a parameter
      * which represents the passed arguments.
      *
-     * Function name is separate from funcNA to prevent a duplicate signature situation (S=List<String>)
+     * Function name is separate from funcNA to prevent a duplicate signature situation.
+     *
+     * Abbreviation for Function-No-Source.
+     *
      * @see [Command.func]
+     *
      */
     fun funcNS(incFunctionNoS: ((A)->Any?)) {
         this.func {args, _ ->
@@ -283,6 +319,11 @@ fun interface ArgumentsVerifier<A> {
     fun verifyArguments(args: A): Boolean
 }
 
+/**
+ * A functional interface for implementing autocomplete for a function.
+ * When the command manager receives a call to [CommandlinManager.getAutocomplete] it will
+ * search for a matching command, then call an attached [AutocompleteHandler] if it exists, returning the result.
+ */
 fun interface AutocompleteHandler<A> {
     /**
      * This function can be called by requesting autocomplete predictions

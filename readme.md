@@ -8,7 +8,11 @@ It makes extensive use of generics, having such functionality for a user-control
 Kotlin DSL is used to simplify the building and usage of the commands.
 The commandlin{} function is the typical way to use all features, while simpleCommandlin{} can be used to prefill the generics such that arguments are a List<String>? and other generics are the Nothing? type.
 
+The compiler may get confusingly angry at you if your call to command{} does not yet contain a func{}/etc. or end with an explicit return, 
+due to how the incoming function and its return types are implemented. Be sure to add the command's function!
 
+It is possible to return a CommandResult from the func{} functions, but it generally needs to be written as
+`return@func ...` rather than a plain return statement.
 
 ## Usage/Examples
 
@@ -22,17 +26,17 @@ fun main() {
     var readmeCMD: CommandlinManager<List<String>, Int, Author?, Props>? = null
     readmeCMD = commandlin {
         requireCommandPermission = true
+        commandRegistrar = ExternalRegistryHelper()
         command("test") {
             properties = Props("This is a test command!")
-            permissionVerifier = BasicPermissionVerifier(1) //Built-in integer permission system
-            // Permission value in .process() must be equal or greater than this value to execute
+            permissionVerifier = BasicPermissionVerifier(1) //Built-in simple integer permission system - permission value in .process() must be equal or greater than this value to execute
             func { args, source ->
                 println("We have ${args.size} arguments from ${source?.name}: $args")
             }
         }
         command("help") {
             properties = Props("Print this help statement.")
-            permissionVerifier = BasicPermissionVerifier(0) //0 or higher to execute the help command
+            permissionVerifier = BasicPermissionVerifier(0)
             func { args, source ->
                 readmeCMD?.commands?.forEach { (mapKey, command) ->
                     println("${command.id} - ${command.properties?.commandHelpText}")
@@ -45,7 +49,6 @@ fun main() {
     val someOtherArguments = listOf("This is a test")
     val author = Author("Steve")
 
-    //This process statement has a 0 for its permission object, but our command requires 1
     val failedResult = readmeCMD.process("test", listOf("This should not print"), 0, author)
     println(failedResult)
     val successResult = readmeCMD.process("test", someArguments, 1, author)
@@ -53,8 +56,20 @@ fun main() {
     readmeCMD.process("test", someOtherArguments, 1, null)
     readmeCMD.process("help", someArguments, 1, null)
 }
+
 class Author(var name: String)
 class Props(var commandHelpText: String)
+
+class ExternalRegistryHelper: CommandRegistrar<List<String>, Int, Author?, Props> {
+    override fun handleRegistration(command: Command<List<String>, Int, Author?, Props>) {
+        // exampleExternalTool.addCommand(command.id, otherParameters)
+        println("We added a command! ${command.id}")
+    }
+    override fun handleDeregistration(command: Command<List<String>, Int, Author?, Props>) {
+        // exampleExternalTool.removeCommand(command.id)
+        println("We removed a command! ${command.id}")
+    }
+}
 ```
 
 ```kotlin
@@ -64,6 +79,11 @@ fun main() {
         command("hello") {
             funcNP {
                 println(" world!")
+            }
+        }
+        command("thiscommandfails") {
+            funcNP {
+                return@funcNP CommandResult.GENERIC_FAILURE
             }
         }
     }
