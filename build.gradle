@@ -5,7 +5,7 @@ plugins {
 }
 
 group 'io.github.talkarcabbage.commandlin'
-version '0.5.0'
+version '0.5.1'
 
 sourceCompatibility = 1.8
 
@@ -23,4 +23,10 @@ compileKotlin {
 }
 compileTestKotlin {
     kotlinOptions.jvmTarget = "1.8"
+}
+
+tasks.register('dokkaHtmlJar', Jar.class) {
+    dependsOn(dokkaHtml)
+    from(dokkaHtml)
+    archiveClassifier.set("html-docs")
 }
